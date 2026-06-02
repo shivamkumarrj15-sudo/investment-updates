@@ -580,22 +580,23 @@ async function analyzeStockWithExitRule(stockName, buyPrice, newsArticles) {
     }).join('\n');
   }
 
-  const systemPrompt = `You are a professional financial advisor. Analyze the stock based on its news and purchase buy price.
+  const systemPrompt = `You are a professional financial advisor. Analyze the stock based on its news, quarterly results (Q1, Q2, Q3 if available), and purchase buy price.
 IMPORTANT instructions for outputs:
 1. All descriptions, summaries, future growth, and outlooks must be written in HINGLISH (Hindi written in English alphabet, e.g. "Stock me acchi growth dikh rahi hai...", "Company ke profits achhe hain isliye investment continue rakhna chahiye").
-2. Perform a strict risk assessment. If there is BAD NEWS (scams, high regulatory penalties, massive profit drops, major geopolitical threats) that can severely damage the stock, set action to "EXIT". Otherwise, if the profit profile looks fine or news is positive/neutral, set action to "CONTINUE".
-3. Provide a suggested target exit price in the 'exit_price' field. If the action is CONTINUE, exit_price can be a target taking profit price or 'Market price' or 'N/A'. If EXIT, suggest a price to exit immediately or cut losses.
-4. Return ONLY a valid JSON object. Do not include markdown code block syntax like \`\`\`json.
+2. Explicitly cover any recent Q1, Q2, or Q3 earnings results/news if mentioned. Explain if the company has high upside growth potential (high target up) or if there are risks.
+3. Perform a strict risk assessment. Recommending whether to HOLD (represented as "CONTINUE") or "EXIT" the stock. If there is BAD NEWS (scams, regulatory penalties, major profit declines, or poor earnings) set action to "EXIT". Otherwise, if future potential looks high or news/earnings are good/neutral, set action to "CONTINUE" (meaning HOLD).
+4. Provide a suggested target exit/take-profit price in the 'exit_price' field (e.g. ₹250 or 'N/A').
+5. Return ONLY a valid JSON object. Do not include markdown code block syntax like \`\`\`json.
 
 JSON Schema:
 {
-  "summary": "2-3 sentence Hinglish news summary.",
+  "summary": "2-3 sentence Hinglish news summary. Mention Q1/Q2/Q3 quarterly results if found in news.",
   "sentiment": "Bullish, Bearish, or Neutral",
   "geopolitical_risk": "Low, Medium, or High",
   "action": "CONTINUE or EXIT",
   "exit_price": "Suggested target price (e.g. ₹220 or 'N/A').",
-  "future_growth": "1-2 sentence description in Hinglish of the company's future growth prospects.",
-  "outlook": "2-3 sentence Hinglish rationale recommending if user should CONTINUE or EXIT and why."
+  "future_growth": "1-2 sentence description in Hinglish of future potential, target upsides, and quarterly outlook.",
+  "outlook": "2-3 sentence Hinglish rationale recommending if user should HOLD (CONTINUE) or EXIT (SELL) and why."
 }`;
 
   const userPrompt = `Stock: ${stockName}
@@ -1089,9 +1090,9 @@ async function sendEmailReport(reportData, fiiTrend, fileLink) {
           
           <!-- Interactive Settings Portal -->
           <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 25px; border-radius: 12px; text-align: center; margin-top: 25px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
-            <h4 style="margin: 0 0 10px 0; color: #1e293b; font-size: 15px; font-weight: 700;">⚙️ Update Your Watchlist & Purchase Prices from Mobile or PC</h4>
+            <h4 style="margin: 0 0 10px 0; color: #1e293b; font-size: 15px; font-weight: 700;">⚙️ Yahan par aap apne stocks add ya delete kar sakte hain:</h4>
             <p style="color: #475569; font-size: 13px; margin: 0 0 20px 0; line-height: 1.5;">
-              Aap apne stocks list aur purchase prices ko niche diye gaye options me se modify kar sakte hain:
+              Niche diye gaye options se aap naye stocks list me add kar sakte hain taaki unki news aur report aati rahe:
             </p>
             <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
               ${CONFIG.mobilePortalUrl ? `

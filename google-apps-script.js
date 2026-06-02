@@ -132,9 +132,16 @@ function deleteStock(rowIndex) {
   }
 }
 
-// Helper to open or initialize 'Stocks' worksheet with 4 columns
 function GetOrCreateStocksSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let ss = null;
+  try {
+    ss = SpreadsheetApp.getActiveSpreadsheet();
+  } catch (e) {}
+  
+  if (!ss) {
+    ss = SpreadsheetApp.openById('1oDZbVB_zgXJ0OGlVDwHL8DWzPFbhfpTAtmILkf3Of1U');
+  }
+  
   let sheet = ss.getSheetByName('Stocks');
   if (!sheet) {
     sheet = ss.insertSheet('Stocks');

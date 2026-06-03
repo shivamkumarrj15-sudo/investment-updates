@@ -509,7 +509,7 @@
         document.getElementById('connectionMode').value = mode;
       }
       
-      const savedUrl = localStorage.getItem('conn_cloud_url') || '';
+      const savedUrl = localStorage.getItem('conn_cloud_url') || 'https://script.google.com/macros/s/AKfycbyyyac4DcmUAKmQWEwGguqQgqSLyoCEz2UArF3a6XOCHTVGRNrfCqJQOW_8Y5xZ6_0ELQ/exec';
       document.getElementById('googleWebAppUrl').value = savedUrl;
       
       toggleConnectionMode();

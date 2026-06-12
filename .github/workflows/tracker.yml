@@ -2,7 +2,7 @@ name: Daily Investment Tracker
 
 on:
   schedule:
-    - cron: '45 1 * * 1-5' # Runs at 01:45 UTC (07:15 AM IST) Monday to Friday
+    - cron: '30 20 * * 0-4' # Runs at 20:30 UTC (02:00 AM IST) Sunday to Thursday (delivering Monday to Friday mornings)
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:

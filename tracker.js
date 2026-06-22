@@ -471,136 +471,138 @@ function writeCalculationsToOverallSheet(sheet) {
   sheet.getCell('K13').value = { formula: 'K10+K11+K12' };
   sheet.getCell('L13').value = { formula: 'L10+L11+L12' };
 
-  console.log('✅ Wrote and corrected all formulas in "overall data" worksheet.');
+  console.log('✅ Wrote and corrected all formulas');
 }
 
 /**
- * Calculates FII & Pro positions to predict overall market direction
+ * Calculates FII & Pro positions to predict overall market direction.
+ * Direction is determined by a rule-based scoring system (not AI) for accuracy.
+ * AI is used ONLY to generate the Hinglish rationale text.
  */
 async function analyzeFiiProMarketTrend(tradingDays) {
-  console.log('🤖 Starting dynamic 3-day participant Open Interest analysis with AI...');
+  console.log('📊 Starting rule-based 3-day participant OI analysis...');
   const d0 = parseNseCsv(tradingDays[0].csvText);
   const d1 = parseNseCsv(tradingDays[1].csvText);
   const d2 = parseNseCsv(tradingDays[2].csvText);
 
-  const getStats = (dayData, prevDayData, p) => {
-    const fl0 = dayData[p]['Future Index Long'] || 0;
-    const fs0 = dayData[p]['Future Index Short'] || 0;
-    const cl0 = dayData[p]['Option Index Call Long'] || 0;
-    const cs0 = dayData[p]['Option Index Call Short'] || 0;
-    const pl0 = dayData[p]['Option Index Put Long'] || 0;
-    const ps0 = dayData[p]['Option Index Put Short'] || 0;
-
-    const fl1 = prevDayData[p]['Future Index Long'] || 0;
-    const fs1 = prevDayData[p]['Future Index Short'] || 0;
-    const cl1 = prevDayData[p]['Option Index Call Long'] || 0;
-    const cs1 = prevDayData[p]['Option Index Call Short'] || 0;
-    const pl1 = prevDayData[p]['Option Index Put Long'] || 0;
-    const ps1 = prevDayData[p]['Option Index Put Short'] || 0;
-
-    const netFuture0 = fl0 - fs0;
-    const netFuture1 = fl1 - fs1;
-    const netFutureChange = netFuture0 - netFuture1;
-
-    const netOption0 = (cl0 - cs0) - (pl0 - ps0);
-    const netOption1 = (cl1 - cs1) - (pl1 - ps1);
-    const netOptionChange = netOption0 - netOption1;
-
+  // Extract raw position data for a participant on a given day
+  const getRaw = (dayData, p) => {
+    const d = dayData[p] || {};
     return {
-      futureLong: fl0,
-      futureShort: fs0,
-      netFuture: netFuture0,
-      futureChange: netFutureChange,
-      
-      callLong: cl0,
-      callShort: cs0,
-      putLong: pl0,
-      putShort: ps0,
-      netOption: netOption0,
-      optionChange: netOptionChange
+      futureLong:  d['Future Index Long']       || 0,
+      futureShort: d['Future Index Short']      || 0,
+      callLong:    d['Option Index Call Long']  || 0,
+      callShort:   d['Option Index Call Short'] || 0,
+      putLong:     d['Option Index Put Long']   || 0,
+      putShort:    d['Option Index Put Short']  || 0,
     };
   };
 
-  const fii = getStats(d0, d1, 'fii');
-  const pro = getStats(d0, d1, 'pro');
-  const client = getStats(d0, d1, 'client');
-  const dii = getStats(d0, d1, 'dii');
 
-  const fiiD2 = getStats(d1, d2, 'fii');
-  const proD2 = getStats(d1, d2, 'pro');
-  const clientD2 = getStats(d1, d2, 'client');
-  const diiD2 = getStats(d1, d2, 'dii');
+  // Derive computed metrics from raw data
+  const derive = (raw) => {
+    const netFuture  = raw.futureLong - raw.futureShort;  // +ve = net long futures (bullish)
+    const netCallPos = raw.callLong   - raw.callShort;    // +ve = net call buyer
+    const netPutPos  = raw.putLong    - raw.putShort;     // +ve = net put buyer
+    const netOption  = netCallPos - netPutPos;            // +ve = bullish option bias
+    return { ...raw, netFuture, netCallPos, netPutPos, netOption };
+  };
 
-  // Build data description for 3 days to send to AI
-  const promptData = `
-Analyze participant-wise Open Interest (OI) over the last 3 trading days:
+  const fii0 = derive(getRaw(d0, 'fii'));    const fii1 = derive(getRaw(d1, 'fii'));    const fii2 = derive(getRaw(d2, 'fii'));
+  const pro0 = derive(getRaw(d0, 'pro'));    const pro1 = derive(getRaw(d1, 'pro'));
+  const cli0 = derive(getRaw(d0, 'client')); const cli1 = derive(getRaw(d1, 'client'));
+  const dii0 = derive(getRaw(d0, 'dii'));
 
-Trading Day 0 (Latest - ${tradingDays[0].humanDate}):
-- FII: Net Futures: ${fii.netFuture.toLocaleString()} (Change from Day 1: ${fii.futureChange >= 0 ? '+' : ''}${fii.futureChange.toLocaleString()}), Net Options: ${fii.netOption.toLocaleString()} (Change from Day 1: ${fii.optionChange >= 0 ? '+' : ''}${fii.optionChange.toLocaleString()})
-- PRO: Net Futures: ${pro.netFuture.toLocaleString()} (Change from Day 1: ${pro.futureChange >= 0 ? '+' : ''}${pro.futureChange.toLocaleString()}), Net Options: ${pro.netOption.toLocaleString()} (Change from Day 1: ${pro.optionChange >= 0 ? '+' : ''}${pro.optionChange.toLocaleString()})
-- CLIENT: Net Futures: ${client.netFuture.toLocaleString()} (Change from Day 1: ${client.futureChange >= 0 ? '+' : ''}${client.futureChange.toLocaleString()}), Net Options: ${client.netOption.toLocaleString()} (Change from Day 1: ${client.optionChange >= 0 ? '+' : ''}${client.optionChange.toLocaleString()})
-- DII: Net Futures: ${dii.netFuture.toLocaleString()} (Change from Day 1: ${dii.futureChange >= 0 ? '+' : ''}${dii.futureChange.toLocaleString()}), Net Options: ${dii.netOption.toLocaleString()} (Change from Day 1: ${dii.optionChange >= 0 ? '+' : ''}${dii.optionChange.toLocaleString()})
+  // Day-on-day changes
+  const fiiNetFutChange = fii0.netFuture - fii1.netFuture;
+  const fiiOptChange    = fii0.netOption  - fii1.netOption;
+  const proNetFutChange = pro0.netFuture  - pro1.netFuture;
+  const cliNetFutChange = cli0.netFuture  - cli1.netFuture;
 
-Trading Day 1 (${tradingDays[1].humanDate}):
-- FII: Net Futures: ${fiiD2.netFuture.toLocaleString()} (Change from Day 2: ${fiiD2.futureChange >= 0 ? '+' : ''}${fiiD2.futureChange.toLocaleString()}), Net Options: ${fiiD2.netOption.toLocaleString()} (Change from Day 2: ${fiiD2.optionChange >= 0 ? '+' : ''}${fiiD2.optionChange.toLocaleString()})
-- PRO: Net Futures: ${proD2.netFuture.toLocaleString()} (Change from Day 2: ${proD2.futureChange >= 0 ? '+' : ''}${proD2.futureChange.toLocaleString()}), Net Options: ${proD2.netOption.toLocaleString()} (Change from Day 2: ${proD2.optionChange >= 0 ? '+' : ''}${proD2.optionChange.toLocaleString()})
-- CLIENT: Net Futures: ${clientD2.netFuture.toLocaleString()} (Change from Day 2: ${clientD2.futureChange >= 0 ? '+' : ''}${clientD2.futureChange.toLocaleString()}), Net Options: ${clientD2.netOption.toLocaleString()} (Change from Day 2: ${clientD2.optionChange >= 0 ? '+' : ''}${clientD2.optionChange.toLocaleString()})
-- DII: Net Futures: ${diiD2.netFuture.toLocaleString()} (Change from Day 2: ${diiD2.futureChange >= 0 ? '+' : ''}${diiD2.futureChange.toLocaleString()}), Net Options: ${diiD2.netOption.toLocaleString()} (Change from Day 2: ${diiD2.optionChange >= 0 ? '+' : ''}${diiD2.optionChange.toLocaleString()})
+  // ─── RULE-BASED SCORING SYSTEM ───────────────────────────────────────────
+  // Score: -6 (strong bearish) to +6 (strong bullish)
+  let ruleScore = 0;
+  const signals = [];
 
-Trading Day 2 (${tradingDays[2].humanDate}):
-- FII: Net Futures: ${(fiiD2.netFuture - fiiD2.futureChange).toLocaleString()}, Net Options: ${(fiiD2.netOption - fiiD2.optionChange).toLocaleString()}
-- PRO: Net Futures: ${(proD2.netFuture - proD2.futureChange).toLocaleString()}, Net Options: ${(proD2.netOption - proD2.optionChange).toLocaleString()}
-- CLIENT: Net Futures: ${(clientD2.netFuture - clientD2.futureChange).toLocaleString()}, Net Options: ${(clientD2.netOption - clientD2.optionChange).toLocaleString()}
-- DII: Net Futures: ${(diiD2.netFuture - diiD2.futureChange).toLocaleString()}, Net Options: ${(diiD2.netOption - diiD2.optionChange).toLocaleString()}
-`;
+  // 1. FII net futures position (most important signal)
+  if (fii0.netFuture > 0) { ruleScore += 2; signals.push(`FII net long futures (${fii0.netFuture.toLocaleString()} contracts) — Bullish`); }
+  else                    { ruleScore -= 2; signals.push(`FII net short futures (${fii0.netFuture.toLocaleString()} contracts) — Bearish`); }
 
-  const systemPrompt = `You are an expert financial analyst focusing on Indian stock market derivatives.
-Analyze the participant-wise Open Interest (OI) futures and options trends of the last 3 trading days (FII, PRO, CLIENT, DII).
-Generate a daily market prediction (BULLISH/BEARISH/RANGEBOUND) and output it in a JSON object.
+  // 2. FII futures change trend
+  if (fiiNetFutChange > 5000)       { ruleScore += 1; signals.push(`FII increasing longs (+${fiiNetFutChange.toLocaleString()}) — Bullish`); }
+  else if (fiiNetFutChange < -5000) { ruleScore -= 1; signals.push(`FII reducing longs (${fiiNetFutChange.toLocaleString()}) — Bearish`); }
 
-Follow these strict output instructions:
-1. Rationale must be in HINGLISH (Hindi written in English alphabet, e.g. "FIIs ne pichle 3 dino me continuous heavy futures selling ki hai, jabki Retail client heavy longs me hain..."). Mention the specific behavior of FII, DII, Pro, and Client over the last 3 days to support your opinion.
-2. Return ONLY a valid JSON object. Do not include markdown code block syntax like \`\`\`json.
+  // 3. FII option bias (positive = more calls = bullish, negative = more puts = bearish)
+  if (fii0.netOption > 30000)       { ruleScore += 1; signals.push(`FII bullish option stance (${fii0.netOption.toLocaleString()})`); }
+  else if (fii0.netOption < -30000) { ruleScore -= 1; signals.push(`FII bearish option stance (${fii0.netOption.toLocaleString()})`); }
 
-JSON Schema:
-{
-  "direction": "UP (BULLISH)" or "DOWN (BEARISH)" or "NEUTRAL / RANGEBOUND",
-  "score": "Strong Bullish 🚀" or "Bullish 🐂" or "Neutral 😐" or "Bearish 🐻" or "Strong Bearish 🚨",
-  "rationale": "3-4 sentence detailed market overview in Hinglish describing the 3-day derivative trend.",
-  "fii_stance": "BULLISH (LONG)" or "BEARISH (SHORT)" or "NEUTRAL / SIDEWAYS",
-  "pro_stance": "BULLISH (LONG)" or "BEARISH (SHORT)" or "NEUTRAL / SIDEWAYS",
-  "client_stance": "BULLISH (LONG)" or "BEARISH (SHORT)" or "NEUTRAL / SIDEWAYS"
-}`;
+  // 4. PRO traders
+  if (pro0.netFuture > 5000)        { ruleScore += 1; signals.push(`PRO net long futures (${pro0.netFuture.toLocaleString()}) — Bullish`); }
+  else if (pro0.netFuture < -5000)  { ruleScore -= 1; signals.push(`PRO net short futures (${pro0.netFuture.toLocaleString()}) — Bearish`); }
+
+  // 5. CLIENT (retail) — contra-indicator
+  if (cli0.netFuture > 100000)       { ruleScore -= 1; signals.push(`CLIENT heavy long (${cli0.netFuture.toLocaleString()}) — Contra-bearish`); }
+  else if (cli0.netFuture < -100000) { ruleScore += 1; signals.push(`CLIENT heavy short (${cli0.netFuture.toLocaleString()}) — Contra-bullish`); }
+
+  // 6. DII
+  if (dii0.netFuture > 0) { ruleScore += 0.5; signals.push(`DII net long futures — Supportive`); }
+  else                    { ruleScore -= 0.5; signals.push(`DII net short futures — Weak`); }
+
+  // ─── Determine direction from score ──────────────────────────────────────
+  let direction, scoreLabel, fiiStance, proStance, clientStance;
+  if (ruleScore >= 3.5)       { direction = 'UP (BULLISH)';         scoreLabel = 'Strong Bullish 🚀'; }
+  else if (ruleScore >= 1.5)  { direction = 'UP (BULLISH)';         scoreLabel = 'Bullish 🐂'; }
+  else if (ruleScore >= -1.5) { direction = 'NEUTRAL / RANGEBOUND'; scoreLabel = 'Neutral 😐'; }
+  else if (ruleScore >= -3.5) { direction = 'DOWN (BEARISH)';       scoreLabel = 'Bearish 🐻'; }
+  else                        { direction = 'DOWN (BEARISH)';       scoreLabel = 'Strong Bearish 🚨'; }
+
+  fiiStance    = fii0.netFuture > 10000    ? 'BULLISH (LONG)' : fii0.netFuture < -10000    ? 'BEARISH (SHORT)' : 'NEUTRAL / SIDEWAYS';
+  proStance    = pro0.netFuture > 5000     ? 'BULLISH (LONG)' : pro0.netFuture < -5000     ? 'BEARISH (SHORT)' : 'NEUTRAL / SIDEWAYS';
+  clientStance = cli0.netFuture > 50000    ? 'BULLISH (LONG)' : cli0.netFuture < -50000    ? 'BEARISH (SHORT)' : 'NEUTRAL / SIDEWAYS';
+
+  console.log(`📊 Rule-based score: ${ruleScore.toFixed(1)}/6 → ${scoreLabel} (${direction})`);
+  signals.forEach(s => console.log(`   • ${s}`));
+
+  // ─── AI used ONLY for Hinglish rationale text ────────────────────────────
+  const systemPromptRationale = `You are an expert Indian stock market analyst. Write clear, data-driven market commentary in Hinglish (Hindi in English alphabets). Use numbers from the data. Start directly with the analysis — no preamble, no JSON, no markdown.`;
+
+  const aiRationalePrompt = `Market direction (rule-based): ${direction} (Score: ${ruleScore.toFixed(1)}/6)
+
+NSE F&O Participant OI (${tradingDays[0].humanDate}):
+FII Net Futures: ${fii0.netFuture.toLocaleString()} (Change: ${fiiNetFutChange >= 0 ? '+' : ''}${fiiNetFutChange.toLocaleString()})
+FII Net Options bias: ${fii0.netOption.toLocaleString()} (Change: ${fiiOptChange >= 0 ? '+' : ''}${fiiOptChange.toLocaleString()})
+PRO Net Futures: ${pro0.netFuture.toLocaleString()}
+CLIENT Net Futures: ${cli0.netFuture.toLocaleString()}
+DII Net Futures: ${dii0.netFuture.toLocaleString()}
+
+Signals: ${signals.join(' | ')}
+
+Write 3-4 sentences in Hinglish explaining why market is ${direction.includes('UP') ? 'bullish' : direction.includes('DOWN') ? 'bearish' : 'rangebound'} based on the data above. Mention FII futures, FII options, PRO, CLIENT (contra-indicator), DII with numbers.`;
 
   const models = [
     'google/gemma-4-31b-it:free',
     'google/gemma-4-26b-a4b-it:free',
-    'openrouter/free',
     'meta-llama/llama-3.3-70b-instruct:free',
-    'meta-llama/llama-3.2-3b-instruct:free',
     'qwen/qwen3-coder:free',
     'z-ai/glm-4.5-air:free',
+    'meta-llama/llama-3.2-3b-instruct:free',
     'nousresearch/hermes-3-llama-3.1-405b:free',
     'liquid/lfm-2.5-1.2b-instruct:free',
     'openai/gpt-oss-20b:free'
   ];
 
-  let direction = 'NEUTRAL / RANGEBOUND';
-  let score = 'Neutral 😐';
-  let rationale = 'Dynamic trend analysis failed to load.';
-  let fiiStance = 'NEUTRAL / SIDEWAYS';
-  let proStance = 'NEUTRAL / SIDEWAYS';
-  let clientStance = 'NEUTRAL / SIDEWAYS';
+  // Default rationale in case all AI calls fail
+  let rationale = `FII ne ${fii0.netFuture > 0 ? 'net long' : 'net short'} futures rakhi hain (${fii0.netFuture.toLocaleString()} contracts), option stance ${fii0.netOption > 0 ? 'bullish' : 'bearish'} (${fii0.netOption.toLocaleString()}). PRO ${pro0.netFuture > 0 ? 'bullish' : 'bearish'} (${pro0.netFuture.toLocaleString()}), CLIENT ${cli0.netFuture > 0 ? 'long' : 'short'} (${cli0.netFuture.toLocaleString()}) — contra-${cli0.netFuture > 0 ? 'bearish' : 'bullish'} signal. DII ${dii0.netFuture > 0 ? 'supportive (long)' : 'short'} hain. Score ${ruleScore.toFixed(1)}/6 ke saath market ${direction.includes('UP') ? 'bullish' : direction.includes('DOWN') ? 'bearish' : 'rangebound'} hai.`;
 
   for (let i = 0; i < models.length; i++) {
     const modelName = models[i];
-    console.log(`   🤖 Querying OpenRouter model: ${modelName} for market trend...`);
+    console.log(`   🤖 Generating rationale using: ${modelName}...`);
     try {
       const response = await axios.post(CONFIG.openRouter.baseUrl, {
         model: modelName,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: promptData }
+          { role: 'system', content: systemPromptRationale },
+          { role: 'user', content: aiRationalePrompt }
         ]
       }, {
         headers: {
@@ -612,69 +614,32 @@ JSON Schema:
         timeout: 25000
       });
 
-      if (response.data?.error) {
-        throw new Error(`OpenRouter Error: ${response.data.error.message || JSON.stringify(response.data.error)}`);
-      }
+      if (response.data?.error) throw new Error(`OpenRouter Error: ${response.data.error.message}`);
+      const content = response.data?.choices?.[0]?.message?.content;
+      if (!content) throw new Error('Empty response from model.');
 
-      let content = response.data?.choices?.[0]?.message?.content;
-      if (!content) {
-        throw new Error('Empty response from model.');
-      }
-
-      let jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON object found in response.');
-      }
-
-      const parsed = JSON.parse(jsonMatch[0].trim());
-      direction = parsed.direction || 'NEUTRAL / RANGEBOUND';
-      score = parsed.score || 'Neutral 😐';
-      rationale = parsed.rationale || 'Analysis overview not found.';
-      fiiStance = parsed.fii_stance || 'NEUTRAL / SIDEWAYS';
-      proStance = parsed.pro_stance || 'NEUTRAL / SIDEWAYS';
-      clientStance = parsed.client_stance || 'NEUTRAL / SIDEWAYS';
-
-      console.log(`   ✅ Market analysis successfully processed using model: ${modelName}`);
+      rationale = content.trim().replace(/```[a-z]*/gi, '').replace(/```/g, '').trim();
+      console.log(`   ✅ Rationale generated using: ${modelName}`);
       break;
     } catch (error) {
       const errorMsg = error.response?.data?.error?.message || error.message;
       console.warn(`   ⚠️ Model ${modelName} failed: ${errorMsg}`);
-      if (i === models.length - 1) {
-        console.error('   ❌ All models failed for trend analysis. Falling back to default calculation rules.');
-        // Fallback rule-based calculations if OpenRouter is completely down
-        const smartMoneyOptionChange = fii.optionChange + pro.optionChange;
-        if (fii.netOption + pro.netOption < -200000 || smartMoneyOptionChange < -50000) {
-          direction = 'DOWN (BEARISH)';
-          score = 'Strong Bearish 🚨';
-          rationale = `FIIs aur Pros ne heavy options short kiye hain. Retail client opposite position long me hain. Yeh market down hone ka historical fallback indicator hai.`;
-          fiiStance = 'BEARISH (SHORT)';
-          proStance = 'BEARISH (SHORT)';
-        } else if (fii.netOption + pro.netOption > 200000 || smartMoneyOptionChange > 50000) {
-          direction = 'UP (BULLISH)';
-          score = 'Strong Bullish 🚀';
-          rationale = `FII aur Pro ne combined heavy call positions and long build-up kiya hai. Retail short hai. Yeh market upward momentum ka signal hai.`;
-          fiiStance = 'BULLISH (LONG)';
-          proStance = 'BULLISH (LONG)';
-        } else {
-          rationale = `FII aur Pro option positions mixed hain. Client aur Smart Money conflicting direction me evenly split hain, isliye market rangebound/sideways console karegi.`;
-        }
-      }
     }
   }
 
-  // Update stances in returned objects
-  fii.stance = fiiStance;
-  pro.stance = proStance;
-  client.stance = clientStance;
+  // Build return objects matching what email/Excel sections expect
+  const fii    = { futureLong: fii0.futureLong, futureShort: fii0.futureShort, netFuture: fii0.netFuture, futureChange: fiiNetFutChange, callLong: fii0.callLong, callShort: fii0.callShort, putLong: fii0.putLong, putShort: fii0.putShort, netOption: fii0.netOption, optionChange: fiiOptChange, stance: fiiStance };
+  const pro    = { futureLong: pro0.futureLong, futureShort: pro0.futureShort, netFuture: pro0.netFuture, futureChange: proNetFutChange, callLong: pro0.callLong, callShort: pro0.callShort, putLong: pro0.putLong, putShort: pro0.putShort, netOption: pro0.netOption, optionChange: pro0.netOption - pro1.netOption, stance: proStance };
+  const client = { futureLong: cli0.futureLong, futureShort: cli0.futureShort, netFuture: cli0.netFuture, futureChange: cliNetFutChange, callLong: cli0.callLong, callShort: cli0.callShort, putLong: cli0.putLong, putShort: cli0.putShort, netOption: cli0.netOption, optionChange: cli0.netOption - cli1.netOption, stance: clientStance };
 
   return {
     fii,
     pro,
     client,
-    smartMoneyOptionChange: fii.optionChange + pro.optionChange,
-    smartMoneyFutureChange: fii.futureChange + pro.futureChange,
+    smartMoneyOptionChange: fii0.netOption + pro0.netOption,
+    smartMoneyFutureChange: fiiNetFutChange + proNetFutChange,
     direction,
-    score,
+    score: scoreLabel,
     rationale,
     date: tradingDays[0].humanDate
   };

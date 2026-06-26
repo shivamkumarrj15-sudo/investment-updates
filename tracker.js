@@ -64,15 +64,11 @@ const mm = String(todayCheck.getMonth() + 1).padStart(2, '0');
 const dd = String(todayCheck.getDate()).padStart(2, '0');
 const todayStr = `${yyyy}-${mm}-${dd}`;
 
-if (dayOfWeek === 0 || dayOfWeek === 6) {
-  console.log(`📅 Today is Weekend in IST (Day ${dayOfWeek}). Skipping automated run.`);
-  process.exit(0);
-}
+// NOTE: We do NOT exit on holidays/weekends here.
+// The tracker always runs and fetches data from the past 3 trading days from NSE archives.
+// NSE archives data is available for past market days regardless of today's date.
+console.log(`📅 Running tracker for IST date: ${todayStr} (Day ${dayOfWeek})`);
 
-if (NSE_HOLIDAYS_2026.includes(todayStr)) {
-  console.log(`📅 Today (${todayStr}) is an official NSE holiday in India. Skipping automated run.`);
-  process.exit(0);
-}
 
 /**
  * Standard HTTP headers for fetching data from NSE (prevents 403 blocks)
@@ -122,11 +118,13 @@ function getSearchQuery(stockName) {
 async function fetchLast3TradingDays() {
   console.log('📅 Finding the last 3 active trading days from NSE archives...');
   const tradingDays = [];
+  const seenDateStrs = new Set(); // Prevent duplicate dates
   let currentDate = new Date();
+  currentDate.setDate(currentDate.getDate() - 1); // Start from yesterday (today's data not published yet)
   let attempts = 0;
   
-  // Look back up to 15 days to collect 3 successful trading days
-  while (tradingDays.length < 3 && attempts < 15) {
+  // Look back up to 20 days to collect 3 successful trading days
+  while (tradingDays.length < 3 && attempts < 20) {
     attempts++;
     const dayOfWeek = currentDate.getDay();
     
@@ -137,32 +135,60 @@ async function fetchLast3TradingDays() {
     }
     
     const ddmmyyyy = formatDateToDDMMYYYY(currentDate);
+    
+    // Skip if we already have this date (dedup guard)
+    if (seenDateStrs.has(ddmmyyyy)) {
+      currentDate.setDate(currentDate.getDate() - 1);
+      continue;
+    }
+    
     const url = `https://archives.nseindia.com/content/nsccl/fao_participant_oi_${ddmmyyyy}.csv`;
     
     try {
       console.log(`   Trying date: ${formatDateToHuman(currentDate)} (${ddmmyyyy})...`);
-      const response = await axios.get(url, { headers: NSE_HEADERS, timeout: 8000 });
+      const response = await axios.get(url, { headers: NSE_HEADERS, timeout: 10000 });
       
-      if (response.status === 200 && response.data && response.data.includes('Client Type')) {
-        console.log(`   ✅ Successful! Trading Day ${tradingDays.length + 1} Found.`);
+      // Validate: must be 200, must contain CSV header, must be at least 500 bytes (not an HTML error page)
+      const isValidCsv = response.status === 200
+        && response.data
+        && typeof response.data === 'string'
+        && response.data.length > 500
+        && (response.data.includes('Client Type') || response.data.includes('Future Index Long'));
+      
+      if (isValidCsv) {
+        seenDateStrs.add(ddmmyyyy);
+        console.log(`   ✅ Valid CSV found! Trading Day ${tradingDays.length + 1}: ${formatDateToHuman(currentDate)} (${response.data.length} bytes)`);
         tradingDays.push({
           date: new Date(currentDate),
           dateStr: ddmmyyyy,
           humanDate: formatDateToHuman(currentDate),
           csvText: response.data
         });
+      } else {
+        console.log(`   ⚠️  Invalid/empty response for ${ddmmyyyy} (skipping - possible holiday or missing data).`);
       }
     } catch (err) {
-      // 404 means the market was closed (holiday) or data is not uploaded yet for today
+      // 404 means the market was closed (holiday) or data is not uploaded yet for this date
+      console.log(`   ℹ️  No data for ${ddmmyyyy}: ${err.message.includes('404') ? 'Not found (holiday/weekend)' : err.message.substring(0, 50)}`);
     }
     
     currentDate.setDate(currentDate.getDate() - 1);
   }
   
-  if (tradingDays.length < 3) {
-    throw new Error(`Could only find ${tradingDays.length} trading days in the last 15 days. Check your network or NSE archives.`);
+  if (tradingDays.length === 0) {
+    throw new Error('Could not find ANY valid trading day data in the last 20 days. Check NSE archives connectivity.');
   }
   
+  if (tradingDays.length < 3) {
+    console.warn(`⚠️  Only found ${tradingDays.length} trading day(s). Duplicating last available day to fill 3-day window.`);
+    // Fill up to 3 by duplicating the oldest available day — better than crashing
+    while (tradingDays.length < 3) {
+      const last = tradingDays[tradingDays.length - 1];
+      tradingDays.push({ ...last });
+    }
+  }
+  
+  console.log(`✅ Trading days collected: ${tradingDays.map(d => d.humanDate).join(', ')}`);
   return tradingDays;
 }
 

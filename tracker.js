@@ -951,9 +951,139 @@ async function uploadReport() {
 }
 
 /**
+ * Fetches macro/geopolitical/sector news that can move the Indian stock market
+ */
+async function fetchMarketMovingNews() {
+  console.log('📰 Fetching macro market-moving news...');
+  const queries = [
+    'India stock market OR Nifty OR Sensex',
+    'India economy OR RBI OR budget OR GST',
+    'geopolitical war OR ceasefire OR sanctions OR oil price',
+    'AI artificial intelligence sector OR IT sector crash OR tech layoffs',
+    'US Fed rate OR dollar rupee OR inflation OR recession'
+  ];
+
+  const allArticles = [];
+  const date3DaysAgo = new Date();
+  date3DaysAgo.setDate(date3DaysAgo.getDate() - 2);
+  const fromDateStr = date3DaysAgo.toISOString().split('T')[0];
+
+  for (const q of queries) {
+    try {
+      const response = await axios.get(CONFIG.newsApi.baseUrl, {
+        params: {
+          q,
+          from: fromDateStr,
+          sortBy: 'relevance',
+          language: 'en',
+          pageSize: 3,
+          apiKey: CONFIG.newsApi.key
+        },
+        headers: { 'User-Agent': 'InvestmentTrackerBot/2.0' }
+      });
+      if (response.data.status === 'ok' && response.data.articles) {
+        allArticles.push(...response.data.articles);
+      }
+    } catch (err) {
+      console.warn(`   ⚠️ News fetch failed for query "${q.substring(0, 40)}": ${err.message.substring(0, 60)}`);
+    }
+  }
+
+  // Deduplicate by title
+  const seen = new Set();
+  const unique = allArticles.filter(a => {
+    if (!a.title || seen.has(a.title)) return false;
+    seen.add(a.title);
+    return true;
+  });
+
+  console.log(`   ✅ Fetched ${unique.length} unique macro news articles.`);
+  return unique.slice(0, 10); // max 10 articles
+}
+
+/**
+ * Uses AI to analyze each macro news headline and assess Indian market impact
+ */
+async function analyzeMarketImpactNews(articles) {
+  if (!articles || articles.length === 0) {
+    return [];
+  }
+  console.log('🤖 Analyzing market impact of macro news with AI...');
+
+  const newsList = articles.map((a, i) =>
+    `${i + 1}. Title: ${a.title}\n   Source: ${a.source?.name || 'Unknown'}\n   Published: ${a.publishedAt || 'N/A'}`
+  ).join('\n\n');
+
+  const systemPrompt = `You are an expert Indian stock market analyst. Analyze macro news headlines and assess their impact on the Indian stock market (Nifty/Sensex). For each headline, return a JSON array where each item has:
+- "headline": the original news title (copy exactly)
+- "impact": "BULLISH" or "BEARISH" or "NEUTRAL"
+- "impact_icon": "🚀" for BULLISH, "🔻" for BEARISH, "😐" for NEUTRAL
+- "sector": most affected sector (e.g., "IT", "Banking", "Oil & Gas", "Pharma", "Auto", "Defense", "Overall Market", "Realty", "FMCG")
+- "hinglish_reason": 1 short sentence in Hinglish explaining WHY this news impacts the market.
+
+Return ONLY a valid JSON array. No markdown, no code blocks.`;
+
+  const userPrompt = `Today's macro news headlines (assess impact on Indian stock market):\n\n${newsList}`;
+
+  const models = [
+    'google/gemma-4-31b-it:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'qwen/qwen3-coder:free',
+    'z-ai/glm-4.5-air:free',
+    'meta-llama/llama-3.2-3b-instruct:free',
+    'openai/gpt-oss-20b:free'
+  ];
+
+  for (const modelName of models) {
+    console.log(`   🤖 Using model: ${modelName} for news impact analysis...`);
+    try {
+      const response = await axios.post(CONFIG.openRouter.baseUrl, {
+        model: modelName,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]
+      }, {
+        headers: {
+          'Authorization': `Bearer ${CONFIG.openRouter.key}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/google/gemini-investment-tracker',
+          'X-Title': 'Investment Tracker Bot'
+        },
+        timeout: 30000
+      });
+
+      if (response.data?.error) throw new Error(response.data.error.message);
+      const content = response.data?.choices?.[0]?.message?.content;
+      if (!content) throw new Error('Empty response.');
+
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) throw new Error('No JSON array found in response.');
+
+      const parsed = JSON.parse(jsonMatch[0].trim());
+      if (!Array.isArray(parsed)) throw new Error('Response is not an array.');
+
+      console.log(`   ✅ News impact analysis done. ${parsed.length} items classified.`);
+      return parsed;
+    } catch (error) {
+      console.warn(`   ⚠️ Model ${modelName} failed: ${error.message.substring(0, 80)}`);
+    }
+  }
+
+  // Fallback: return basic items without AI analysis
+  return articles.slice(0, 8).map(a => ({
+    headline: a.title,
+    impact: 'NEUTRAL',
+    impact_icon: '😐',
+    sector: 'Overall Market',
+    hinglish_reason: 'AI analysis abhi available nahi hai.'
+  }));
+}
+
+/**
  * Sends a daily HTML email with FII/DII analysis and portfolio actions in HINGLISH
  */
-async function sendEmailReport(reportData, fiiTrend, fileLink) {
+async function sendEmailReport(reportData, fiiTrend, fileLink, marketNews) {
   console.log(`📧 Sending report to ${CONFIG.email.receiver}...`);
   
   const transporter = nodemailer.createTransport({
@@ -1162,6 +1292,31 @@ async function sendEmailReport(reportData, fiiTrend, fileLink) {
             </p>
           </div>
           
+          <!-- 📰 Market-Moving News Section -->
+          ${marketNews && marketNews.length > 0 ? `
+          <div style="margin-bottom: 30px;">
+            <h3 style="color: #0f172a; margin-bottom: 15px; font-size: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">📰 Aaj Ki Market-Moving News</h3>
+            <div style="display: grid; gap: 10px;">
+              ${marketNews.map(item => {
+                const impactColor = item.impact === 'BULLISH' ? '#065f46' : item.impact === 'BEARISH' ? '#991b1b' : '#475569';
+                const impactBg = item.impact === 'BULLISH' ? '#d1fae5' : item.impact === 'BEARISH' ? '#fee2e2' : '#f1f5f9';
+                const borderColor = item.impact === 'BULLISH' ? '#22c55e' : item.impact === 'BEARISH' ? '#ef4444' : '#94a3b8';
+                return `
+                <div style="background-color: #ffffff; border-left: 4px solid ${borderColor}; border-radius: 0 8px 8px 0; padding: 12px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
+                    <span style="font-weight: 600; font-size: 13px; color: #0f172a; flex: 1;">${item.impact_icon || ''} ${item.headline}</span>
+                    <div style="display: flex; gap: 6px; flex-shrink: 0;">
+                      <span style="background-color: ${impactBg}; color: ${impactColor}; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700;">${item.impact}</span>
+                      <span style="background-color: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 600;">${item.sector || 'Market'}</span>
+                    </div>
+                  </div>
+                  <p style="margin: 0; color: #475569; font-size: 12px; line-height: 1.5;">💬 ${item.hinglish_reason}</p>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>
+          ` : ''}
+
           <!-- Summary Table -->
           <h3 style="color: #0f172a; margin-bottom: 15px; font-size: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">💼 Portfolio Stock Tracker</h3>
           <div style="overflow-x: auto; margin-bottom: 30px;">
@@ -1379,14 +1534,18 @@ async function runTracker() {
     }
 
     console.log(`\n-----------------------------------------`);
-    // 9. Write report sheet to Excel workbook
+    // 9. Fetch macro market-moving news
+    const rawMarketNews = await fetchMarketMovingNews();
+    const marketNews = await analyzeMarketImpactNews(rawMarketNews);
+
+    // 10. Write report sheet to Excel workbook
     await writeReportToExcel(workbook, reportData);
     
-    // 10. Upload file for sharing link
+    // 11. Upload file for sharing link
     const fileLink = await uploadReport();
     
-    // 11. Send email report
-    const emailSent = await sendEmailReport(reportData, fiiTrend, fileLink);
+    // 12. Send email report
+    const emailSent = await sendEmailReport(reportData, fiiTrend, fileLink, marketNews);
     
     if (emailSent) {
       console.log('\n=========================================');

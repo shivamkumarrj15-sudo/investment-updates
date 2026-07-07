@@ -1086,19 +1086,38 @@ Return ONLY a valid JSON array. No markdown, no code blocks.`;
 async function sendEmailReport(reportData, fiiTrend, fileLink, marketNews) {
   console.log(`📧 Sending report to ${CONFIG.email.receiver}...`);
   
+  // Use explicit SMTP settings instead of 'service: gmail' for reliability in CI/GitHub Actions
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true, // SSL
     auth: {
       user: CONFIG.email.sender,
       pass: CONFIG.email.password
-    }
+    },
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000
   });
 
-  try {
-    await transporter.verify();
-    console.log('   SMTP verified.');
-  } catch (err) {
-    console.error('   ❌ SMTP Connection failed:', err.message);
+  // Retry SMTP verification up to 3 times
+  let smtpOk = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await transporter.verify();
+      console.log(`   ✅ SMTP verified (attempt ${attempt}).`);
+      smtpOk = true;
+      break;
+    } catch (err) {
+      console.warn(`   ⚠️ SMTP verify attempt ${attempt}/3 failed: ${err.message}`);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+  if (!smtpOk) {
+    console.error('   ❌ SMTP Connection failed after 3 attempts. Email not sent.');
     return false;
   }
 
@@ -1384,27 +1403,31 @@ async function sendEmailReport(reportData, fiiTrend, fileLink, marketNews) {
     </div>
   `;
 
-  try {
-    const mailOptions = {
-      from: `"📈 Market & Portfolio Update" <${CONFIG.email.sender}>`,
-      to: CONFIG.email.receiver,
-      subject: `📈 Daily Market Update: View is ${fiiTrend.direction.split(' ')[0]} | ${fiiTrend.humanDate || fiiTrend.date}`,
-      html: htmlBody,
-      attachments: [
-        {
-          filename: `stocks_report_${new Date().toISOString().split('T')[0]}.xlsx`,
-          path: CONFIG.excelFile
-        }
-      ]
-    };
+  const mailOptions = {
+    from: `"📈 Market & Portfolio Update" <${CONFIG.email.sender}>`,
+    to: CONFIG.email.receiver,
+    subject: `📈 Daily Market Update: View is ${fiiTrend.direction.split(' ')[0]} | ${fiiTrend.humanDate || fiiTrend.date}`,
+    html: htmlBody,
+    attachments: [
+      {
+        filename: `stocks_report_${new Date().toISOString().split('T')[0]}.xlsx`,
+        path: CONFIG.excelFile
+      }
+    ]
+  };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Mail sent successfully! Message ID: ${info.messageId}`);
-    return true;
-  } catch (error) {
-    console.error(`❌ Failed to send email: ${error.message}`);
-    return false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const info = await transporter.sendMail(mailOptions);
+      console.log(`✅ Mail sent successfully! Message ID: ${info.messageId}`);
+      return true;
+    } catch (error) {
+      console.error(`❌ sendMail attempt ${attempt}/3 failed: ${error.message}`);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 5000));
+    }
   }
+  console.error('❌ All 3 sendMail attempts failed. Email not delivered.');
+  return false;
 }
 
 /**

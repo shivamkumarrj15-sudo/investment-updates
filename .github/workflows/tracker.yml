@@ -2,12 +2,16 @@ name: Daily Investment Tracker
 
 on:
   schedule:
-    - cron: '30 20 * * 0-4' # Runs at 20:30 UTC (02:00 AM IST) Sunday to Thursday (delivering Monday to Friday mornings)
+    # Main run: 8:30 PM UTC = 2:00 AM IST (Mon-Fri delivery)
+    - cron: '30 20 * * 0-4'
+    # Keep-alive run every Sunday to prevent GitHub from disabling the workflow
+    - cron: '0 18 * * 0'
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
   run-tracker:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3

@@ -1219,6 +1219,44 @@ async function sendEmailReport(reportData, fiiTrend, fileLink, marketNews) {
     ${fileLink ? `<p style="color: #64748b; font-size: 12px; text-align: center; margin-top: -15px; margin-bottom: 25px;">Excel link valid for 24 hours: <a href="${fileLink}" style="color: #2563eb;">${fileLink}</a></p>` : ''}
   `;
 
+  // Helper: strip characters that could break template literals
+  const sanitizeHtml = (str) => String(str || '')
+    .replace(/`/g, "'")
+    .replace(/\$\{/g, '&#36;{')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // Pre-build market news HTML (outside main template to avoid nested literal issues)
+  let newsCardsHtml = '';
+  if (marketNews && marketNews.length > 0) {
+    const cards = marketNews.map(item => {
+      const impact      = (item.impact || 'NEUTRAL').toUpperCase();
+      const icon        = item.impact_icon || (impact === 'BULLISH' ? '🚀' : impact === 'BEARISH' ? '🔻' : '😐');
+      const headline    = sanitizeHtml(item.headline);
+      const reason      = sanitizeHtml(item.hinglish_reason);
+      const sector      = sanitizeHtml(item.sector || 'Market');
+      const impactColor = impact === 'BULLISH' ? '#065f46'  : impact === 'BEARISH' ? '#991b1b'  : '#475569';
+      const impactBg    = impact === 'BULLISH' ? '#d1fae5'  : impact === 'BEARISH' ? '#fee2e2'  : '#f1f5f9';
+      const borderColor = impact === 'BULLISH' ? '#22c55e'  : impact === 'BEARISH' ? '#ef4444'  : '#94a3b8';
+      return `<div style="background-color:#ffffff;border-left:4px solid ${borderColor};border-radius:0 8px 8px 0;padding:12px 16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
+          <span style="font-weight:600;font-size:13px;color:#0f172a;flex:1;">${icon} ${headline}</span>
+          <div style="display:flex;gap:6px;flex-shrink:0;">
+            <span style="background-color:${impactBg};color:${impactColor};padding:2px 8px;border-radius:9999px;font-size:10px;font-weight:700;">${impact}</span>
+            <span style="background-color:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:9999px;font-size:10px;font-weight:600;">${sector}</span>
+          </div>
+        </div>
+        <p style="margin:0;color:#475569;font-size:12px;line-height:1.5;">💬 ${reason}</p>
+      </div>`;
+    }).join('');
+
+    newsCardsHtml = `
+      <div style="margin-bottom:30px;">
+        <h3 style="color:#0f172a;margin-bottom:15px;font-size:16px;border-bottom:2px solid #f1f5f9;padding-bottom:8px;">📰 Aaj Ki Market-Moving News</h3>
+        ${cards}
+      </div>`;
+  }
+
   const htmlBody = `
     <div style="background-color: #f1f5f9; padding: 30px; font-family: 'Segoe UI', -apple-system, sans-serif;">
       <div style="max-width: 950px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
@@ -1312,29 +1350,7 @@ async function sendEmailReport(reportData, fiiTrend, fileLink, marketNews) {
           </div>
           
           <!-- 📰 Market-Moving News Section -->
-          ${marketNews && marketNews.length > 0 ? `
-          <div style="margin-bottom: 30px;">
-            <h3 style="color: #0f172a; margin-bottom: 15px; font-size: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">📰 Aaj Ki Market-Moving News</h3>
-            <div style="display: grid; gap: 10px;">
-              ${marketNews.map(item => {
-                const impactColor = item.impact === 'BULLISH' ? '#065f46' : item.impact === 'BEARISH' ? '#991b1b' : '#475569';
-                const impactBg = item.impact === 'BULLISH' ? '#d1fae5' : item.impact === 'BEARISH' ? '#fee2e2' : '#f1f5f9';
-                const borderColor = item.impact === 'BULLISH' ? '#22c55e' : item.impact === 'BEARISH' ? '#ef4444' : '#94a3b8';
-                return `
-                <div style="background-color: #ffffff; border-left: 4px solid ${borderColor}; border-radius: 0 8px 8px 0; padding: 12px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 6px; margin-bottom: 6px;">
-                    <span style="font-weight: 600; font-size: 13px; color: #0f172a; flex: 1;">${item.impact_icon || ''} ${item.headline}</span>
-                    <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                      <span style="background-color: ${impactBg}; color: ${impactColor}; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700;">${item.impact}</span>
-                      <span style="background-color: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 600;">${item.sector || 'Market'}</span>
-                    </div>
-                  </div>
-                  <p style="margin: 0; color: #475569; font-size: 12px; line-height: 1.5;">💬 ${item.hinglish_reason}</p>
-                </div>`;
-              }).join('')}
-            </div>
-          </div>
-          ` : ''}
+          ${newsCardsHtml}
 
           <!-- Summary Table -->
           <h3 style="color: #0f172a; margin-bottom: 15px; font-size: 16px; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px;">💼 Portfolio Stock Tracker</h3>
@@ -1557,9 +1573,15 @@ async function runTracker() {
     }
 
     console.log(`\n-----------------------------------------`);
-    // 9. Fetch macro market-moving news
-    const rawMarketNews = await fetchMarketMovingNews();
-    const marketNews = await analyzeMarketImpactNews(rawMarketNews);
+    // 9. Fetch macro market-moving news (safe - won't crash bot if it fails)
+    let marketNews = [];
+    try {
+      const rawMarketNews = await fetchMarketMovingNews();
+      marketNews = await analyzeMarketImpactNews(rawMarketNews);
+    } catch (newsErr) {
+      console.warn('⚠️ Market news fetch failed (non-critical):', newsErr.message);
+      marketNews = [];
+    }
 
     // 10. Write report sheet to Excel workbook
     await writeReportToExcel(workbook, reportData);

@@ -1,6 +1,8 @@
 name: Daily Investment Tracker
 
 on:
+  push:
+    branches: [ main ]   # Run on every push to main (for testing/deployment verify)
   schedule:
     # Main run: 8:30 PM UTC = 2:00 AM IST (Mon-Fri delivery)
     - cron: '30 20 * * 0-4'
